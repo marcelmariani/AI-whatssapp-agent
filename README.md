@@ -63,3 +63,64 @@ Faturas e cobranças (futuro).
 
 ### Prompts (Port 4005)
 Gerenciamento de prompts e instruções da IA.
+
+## 🚀 Setup Local
+
+### Requisitos
+
+- Node.js LTS
+- PNPM 8+
+- Docker & Docker Compose
+- Stripe Account (test keys)
+- Google OAuth Credentials
+
+### Instalação
+
+```bash
+# Instalar dependências
+pnpm install
+
+# Configurar variáveis de ambiente
+# Veja .env.example em cada serviço
+
+# Iniciar infraestrutura
+docker-compose up -d
+
+# Rodar em desenvolvimento
+pnpm dev:all
+```
+
+### URLs de Acesso
+
+| Serviço | URL |
+|---------|-----|
+| Portal Cliente | http://localhost:5174 |
+| Portal Admin | http://localhost:5175 |
+| Gateway | http://localhost:4000 |
+| Auth | http://localhost:4001 |
+| Customers | http://localhost:4002 |
+| WhatsApp | http://localhost:4003 |
+| Billing | http://localhost:4004 |
+| Prompts | http://localhost:4005 |
+
+## 🔐 Fluxos de Autenticação
+
+### JWT
+- Login retorna JWT
+- Stored em localStorage
+- Enviado em cada requisição
+- Validado pelo Gateway
+
+### Google OAuth
+- Login via Google
+- Retorna ID token
+- Gateway verifica e cria usuário
+- Retorna JWT
+
+### Stripe
+- Cliente adiciona cartão
+- Redirecionado para Stripe Checkout
+- Stripe retorna token
+- Armazenado no banco
+
+## 🧪 Testes Rápidos
