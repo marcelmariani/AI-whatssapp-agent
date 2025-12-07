@@ -124,3 +124,28 @@ pnpm dev:all
 - Armazenado no banco
 
 ## 🧪 Testes Rápidos
+
+### Registrar
+```bash
+curl -X POST http://localhost:4000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-key" \
+  -d '{"email":"test@example.com","password":"123456","role":"customer"}'
+```
+
+### Login
+```bash
+curl -X POST http://localhost:4000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-key" \
+  -d '{"email":"test@example.com","password":"123456"}'
+```
+
+### Completar Perfil
+```bash
+curl -X PATCH http://localhost:4000/api/customer/me \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-key" \
+  -H "Authorization: Bearer {JWT}" \
+  -d '{"name":"João","document":"12345678900","phone":"11999999999"}'
+```
