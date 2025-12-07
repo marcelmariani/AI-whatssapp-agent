@@ -178,3 +178,15 @@ curl -X POST http://localhost:4000/api/customer/sessions \
 - [MongoDB](https://docs.mongodb.com/)
 - [React 18](https://react.dev)
 - [TypeScript](https://www.typescriptlang.org/)
+
+## 📄 Informações
+
+| Campo | Valor |
+|-------|-------|
+| Status | Em desenvolvimento |
+| Versão | 0.1.0 |
+| Linguagem | TypeScript |
+| Repositório | [AI-whatssapp-agent](https://github.com/marcelmariani/AI-whatssapp-agent) |
+| Owner | marcelmariani |
+
+**Última atualização**: Dezembro 2025
