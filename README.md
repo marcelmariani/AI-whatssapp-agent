@@ -149,3 +149,32 @@ curl -X PATCH http://localhost:4000/api/customer/me \
   -H "Authorization: Bearer {JWT}" \
   -d '{"name":"João","document":"12345678900","phone":"11999999999"}'
 ```
+
+### Criar Sessão WhatsApp
+```bash
+curl -X POST http://localhost:4000/api/customer/sessions \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-key" \
+  -H "Authorization: Bearer {JWT}" \
+  -d '{"phone":"5511999999999"}'
+```
+
+## 🔧 Troubleshooting
+
+| Problema | Solução |
+|----------|---------|
+| QR code não aparece | Verificar se WhatsApp service está rodando |
+| Sessão não conecta | Escanear antes de 30s; se expirar, criar nova |
+| Cartão não salva | Verificar STRIPE_SECRET_KEY |
+| Google OAuth falha | Verificar GOOGLE_CLIENT_ID |
+| Erro 402 ao criar sessão | Completar perfil + adicionar cartão |
+
+## 📚 Referências
+
+- [Baileys](https://github.com/WhiskeySockets/Baileys)
+- [Stripe API](https://stripe.com/docs/api)
+- [Google OAuth](https://developers.google.com/identity/protocols/oauth2)
+- [Express.js](https://expressjs.com/)
+- [MongoDB](https://docs.mongodb.com/)
+- [React 18](https://react.dev)
+- [TypeScript](https://www.typescriptlang.org/)
