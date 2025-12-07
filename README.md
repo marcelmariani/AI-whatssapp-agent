@@ -16,8 +16,6 @@ SmartIA é uma plataforma SaaS que permite clientes automatizar atendimento via 
 
 ---
 
----
-
 ## 🏗️ Stack Tecnológico
 
 | Camada | Tecnologia |
@@ -90,11 +88,12 @@ Login (JWT gerado)
 Cartão armazenado com segurança (apenas token Stripe)
 ```
 
-#### 2️⃣ **Criar Sessão WhatsApp**
+#### 2️⃣ Criar Sessão WhatsApp
+
 ```
 [WhatsApp] Clicar "Criar sessão"
     ↓
-Validar: perfil completo + cartão ativo
+Validar: perfil completo (document + phone) + cartão ativo
     ↓
 Gateway → WhatsApp service cria sessão (status: pending)
     ↓
@@ -107,7 +106,8 @@ Cliente escaneia com WhatsApp
 Sessão status: connected (IA responde 24/7)
 ```
 
-#### 3️⃣ **Configurar Prompt**
+#### 3️⃣ Configurar Prompt
+
 ```
 [Prompt] Criar novo prompt (inativo por padrão)
     ↓
@@ -120,7 +120,8 @@ Ativar prompt (apenas um ativo por número)
 IA começa a responder conforme instruções
 ```
 
-#### 4️⃣ **Consumo de Tokens**
+#### 4️⃣ Consumo de Tokens
+
 ```
 Cliente cada mensagem respondida pela IA
     ↓
@@ -438,8 +439,6 @@ curl -X POST http://localhost:4000/api/customer/sessions \
      ↓
 12. IA começa a responder com base no prompt
 ```
-
----
 
 ---
 
