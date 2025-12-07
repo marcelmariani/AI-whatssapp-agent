@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useGoogleLogin } from "@react-oauth/google";
 
 type Prompt = {
   _id: string;
@@ -16,7 +17,7 @@ type Balance = { tokensRemaining: number } | null;
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:4000";
 const apiKey = import.meta.env.VITE_API_KEY || "dev-key";
 
-type Section = "dashboard" | "prompt" | "whatsapp" | "billing";
+type Section = "dashboard" | "prompt" | "whatsapp" | "billing" | "profile";
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem("customer_token"));
@@ -47,7 +48,16 @@ function App() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
-  const [paymentInput, setPaymentInput] = useState("");
+  const [isLaunchingCheckout, setIsLaunchingCheckout] = useState(false);
+  const [isFinalizingCheckout, setIsFinalizingCheckout] = useState(false);
+  const [profileData, setProfileData] = useState({
+    name: "",
+    document: "",
+    phone: "",
+    type: "PF",
+    address: { street: "", number: "", city: "", state: "", zip: "", country: "" }
+  });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   async function doLogin(loginEmail: string, loginPassword: string) {
     const res = await fetch(`${apiBase}/api/auth/login`, {
@@ -101,6 +111,31 @@ function App() {
     }
   }
 
+  async function handleGoogleLogin(credentialResponse: any) {
+    setLoginError("");
+    try {
+      const res = await fetch(`${apiBase}/api/auth/google-callback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify({ credential: credentialResponse.credential })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData?.message || "Erro ao autenticar com Google");
+      }
+      const data = await res.json();
+      localStorage.setItem("customer_token", data.token);
+      setToken(data.token);
+    } catch (err: any) {
+      setLoginError(err?.message || "Erro ao autenticar com Google");
+    }
+  }
+
+  const googleLogin = useGoogleLogin({
+    onSuccess: handleGoogleLogin,
+    onError: () => setLoginError("Falha ao autenticar com Google")
+  });
+
   function handleLogout() {
     localStorage.removeItem("customer_token");
     setToken(null);
@@ -132,31 +167,6 @@ function App() {
     }
   }
 
-  async function updatePaymentMethod(e: React.FormEvent) {
-    e.preventDefault();
-    if (!paymentInput) {
-      setMsg("Informe um cartão válido.");
-      return;
-    }
-    try {
-      const res = await apiFetch(`${apiBase}/api/customer/payment-method`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentMethodId: paymentInput })
-      });
-      if (!res.ok) {
-        const errData = await safeJson<{ message: string }>(res);
-        throw new Error(errData?.message || "Falha ao atualizar cartão");
-      }
-      const updated = await safeJson<any>(res);
-      setPaymentMethodId(updated?.paymentMethodId || paymentInput);
-      setPaymentInput("");
-      setMsg("Cartão atualizado e ativo.");
-      loadSessions();
-    } catch (err: any) {
-      setMsg(err?.message || "Erro ao atualizar cartão");
-    }
-  }
 
   async function apiFetch(url: string, options?: RequestInit) {
     const res = await fetch(url, {
@@ -210,6 +220,13 @@ function App() {
       const data = await safeJson<any>(res);
       if (data) {
         setPaymentMethodId(data.paymentMethodId || null);
+        setProfileData({
+          name: data.name || "",
+          document: data.document || "",
+          phone: data.phone || "",
+          type: data.type || "PF",
+          address: data.address || { street: "", number: "", city: "", state: "", zip: "", country: "" }
+        });
       }
     } catch (err: any) {
       setPaymentMethodId(null);
@@ -231,6 +248,75 @@ function App() {
     }
   }
 
+  async function startStripeCheckout() {
+    setMsg("");
+    if (!profileData.document || !profileData.phone) {
+      setMsg("Perfil incompleto. Complete nome, documento e telefone em Perfil antes de adicionar cartão.");
+      setActiveSection("profile");
+      return;
+    }
+    setIsLaunchingCheckout(true);
+    try {
+      const origin = window.location.origin;
+      const successUrl = `${origin}?billing=success&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${origin}?billing=cancel`;
+      const res = await apiFetch(`${apiBase}/api/customer/billing/checkout-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ successUrl, cancelUrl })
+      });
+      const data = await safeJson<{ url?: string }>(res);
+      if (!res.ok || !data?.url) {
+        const errData = await safeJson<{ message: string }>(res);
+        throw new Error(errData?.message || "Falha ao iniciar checkout");
+      }
+      window.location.href = data.url;
+    } catch (err: any) {
+      setMsg(err?.message || "Erro ao iniciar checkout");
+    } finally {
+      setIsLaunchingCheckout(false);
+    }
+  }
+
+  async function finalizeStripeCheckout(sessionId: string) {
+    setIsFinalizingCheckout(true);
+    try {
+      const res = await apiFetch(`${apiBase}/api/customer/payment-method/checkout-complete?session_id=${encodeURIComponent(sessionId)}`);
+      const data = await safeJson<{ paymentMethodId?: string; message?: string }>(res);
+      if (!res.ok || !data?.paymentMethodId) {
+        throw new Error(data?.message || "Falha ao finalizar checkout");
+      }
+      setPaymentMethodId(data.paymentMethodId);
+      setMsg("Cartão atualizado e ativo via Stripe.");
+      loadSessions();
+    } catch (err: any) {
+      setMsg(err?.message || "Erro ao finalizar checkout");
+    } finally {
+      setIsFinalizingCheckout(false);
+    }
+  }
+
+  async function saveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setIsSavingProfile(true);
+    try {
+      const res = await apiFetch(`${apiBase}/api/customer/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileData)
+      });
+      if (!res.ok) {
+        const errData = await safeJson<{ message: string }>(res);
+        throw new Error(errData?.message || "Falha ao salvar perfil");
+      }
+      setMsg("Perfil atualizado com sucesso.");
+    } catch (err: any) {
+      setMsg(err?.message || "Erro ao salvar perfil");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
   // PROMPTS
   async function createPrompt(e: React.FormEvent) {
     e.preventDefault();
@@ -240,7 +326,8 @@ function App() {
     }
     const hasActive = sessions.some(s => s.phone === newWhatsapp && s.status === "connected");
     if (!hasActive) {
-      setMsg("Número não possui sessão ativa.");
+      setMsg("Número não possui sessão ativa. Crie uma em WhatsApp primeiro.");
+      setActiveSection("whatsapp");
       return;
     }
     try {
@@ -355,19 +442,38 @@ function App() {
     }
   }, [token]);
 
-  // Polling para atualizar sessões a cada 2 segundos quando há uma sessão em criação
   useEffect(() => {
-    if (creatingSessionId) {
+    if (!token) return;
+    const url = new URL(window.location.href);
+    const billingStatus = url.searchParams.get("billing");
+    const sessionId = url.searchParams.get("session_id");
+    if (billingStatus === "success" && sessionId) {
+      finalizeStripeCheckout(sessionId);
+    } else if (billingStatus === "cancel") {
+      setMsg("Checkout cancelado.");
+    }
+    if (billingStatus) {
+      url.searchParams.delete("billing");
+      url.searchParams.delete("session_id");
+      window.history.replaceState({}, "", url.pathname + (url.search ? `?${url.searchParams.toString()}` : ""));
+    }
+  }, [token]);
+
+  // Polling para atualizar sessões enquanto o modal QR está visível
+  useEffect(() => {
+    if (showQrModal && creatingSessionId) {
       const interval = setInterval(() => {
         loadSessions();
-      }, 2000);
+      }, 1500); // 1.5s para atualização rápida do QR
       setPollInterval(interval);
       return () => {
         clearInterval(interval);
-        setPollInterval(null);
       };
+    } else if (pollInterval) {
+      clearInterval(pollInterval);
+      setPollInterval(null);
     }
-  }, [creatingSessionId]);
+  }, [showQrModal, creatingSessionId]);
 
   async function deleteSession(sessionId: string) {
     if (!confirm("Tem certeza que deseja deletar esta sessão?")) return;
@@ -427,8 +533,14 @@ function App() {
   async function createSession(e: React.FormEvent) {
     e.preventDefault();
     if (!phone) return;
+    if (!profileData.document || !profileData.phone) {
+      setMsg("Perfil incompleto. Complete dados em Perfil antes de criar sessões.");
+      setActiveSection("profile");
+      return;
+    }
     if (!paymentMethodId) {
-      setMsg("Adicione um cartão ativo antes de criar sessões.");
+      setMsg("Adicione um cartão ativo em Billing antes de criar sessões.");
+      setActiveSection("billing");
       return;
     }
     try {
@@ -441,6 +553,13 @@ function App() {
       if (newSession) {
         setCreatingSessionId(newSession._id);
         setShowQrModal(true);
+        // Ativar polling imediatamente para carregar QR
+        if (!pollInterval) {
+          const interval = setInterval(() => {
+            loadSessions();
+          }, 2000);
+          setPollInterval(interval);
+        }
         setMsg("Sessão criada. Escaneie o QR exibido abaixo.");
         loadSessions();
       }
@@ -477,6 +596,16 @@ function App() {
             {bootError && <div className="error-text">{bootError}</div>}
             <button type="submit">{isRegister ? "Criar conta" : "Entrar"}</button>
           </form>
+          <div style={{ textAlign: "center", margin: "1rem 0" }}>
+            <p className="muted">Ou</p>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => googleLogin()}
+            style={{ width: "100%", padding: "0.75rem", marginBottom: "1rem", backgroundColor: "#fff", color: "#000", border: "1px solid #ddd", borderRadius: "4px", cursor: "pointer", fontWeight: "500" }}
+          >
+            🔐 Entrar com Google
+          </button>
           <button className="ghost" onClick={() => { setIsRegister(!isRegister); setLoginError(""); }}> {isRegister ? "Já tenho conta" : "Criar nova conta"} </button>
         </div>
       </div>
@@ -492,6 +621,7 @@ function App() {
           <a className={activeSection === "dashboard" ? "active" : ""} onClick={() => setActiveSection("dashboard")}>Dashboard</a>
           <a className={activeSection === "whatsapp" ? "active" : ""} onClick={() => setActiveSection("whatsapp")}>WhatsApp</a>
           <a className={activeSection === "prompt" ? "active" : ""} onClick={() => setActiveSection("prompt")}>Prompt</a>
+          <a className={activeSection === "profile" ? "active" : ""} onClick={() => setActiveSection("profile")}>Perfil</a>
           <a className={activeSection === "billing" ? "active" : ""} onClick={() => setActiveSection("billing")}>Billing</a>
         </nav>
         <button className="ghost" onClick={handleLogout}>Sair</button>
@@ -543,16 +673,28 @@ function App() {
         {activeSection === "dashboard" && (
           <section className="panels-grid">
             <div className="panel">
-              <div className="panel-header"><div><p className="eyebrow">WhatsApp</p><h3>Sessões</h3></div></div>
-              <p>Use o menu WhatsApp para criar ou acompanhar sessões.</p>
+              <div className="panel-header"><div><p className="eyebrow">Fluxo</p><h3>1. Perfil</h3></div></div>
+              <p className={profileData.document && profileData.phone ? "success" : "muted"}>
+                {profileData.document && profileData.phone ? "✓ Completo" : "⊘ Complete seus dados"}
+              </p>
             </div>
             <div className="panel">
-              <div className="panel-header"><div><p className="eyebrow">Prompt</p><h3>Status</h3></div></div>
-              <p>{activePromptCount > 0 ? "Prompt definido" : "Prompt pendente"}</p>
+              <div className="panel-header"><div><p className="eyebrow">Fluxo</p><h3>2. Cartão</h3></div></div>
+              <p className={paymentMethodId ? "success" : "muted"}>
+                {paymentMethodId ? "✓ Ativo" : "⊘ Adicione cartão"}
+              </p>
             </div>
             <div className="panel">
-              <div className="panel-header"><div><p className="eyebrow">Tokens</p><h3>Saldo</h3></div></div>
-              <p>Saldo atual: {tokens}</p>
+              <div className="panel-header"><div><p className="eyebrow">Fluxo</p><h3>3. WhatsApp</h3></div></div>
+              <p className={sessions.some(s => s.status === "connected") ? "success" : "muted"}>
+                {sessions.some(s => s.status === "connected") ? "✓ Sessão ativa" : "⊘ Crie uma sessão"}
+              </p>
+            </div>
+            <div className="panel">
+              <div className="panel-header"><div><p className="eyebrow">Fluxo</p><h3>4. Prompt</h3></div></div>
+              <p className={activePromptCount > 0 ? "success" : "muted"}>
+                {activePromptCount > 0 ? "✓ Ativo" : "⊘ Ative um prompt"}
+              </p>
             </div>
           </section>
         )}
@@ -707,9 +849,10 @@ function App() {
                 <button className="close-btn" onClick={closeQrModal}>✕</button>
               </div>
               <div className="modal-body">
-                {creatingSessionId && sessions.find(s => s._id === creatingSessionId) && (
+                {creatingSessionId && (
                   (() => {
-                    const session = sessions.find(s => s._id === creatingSessionId)!;
+                    const session = sessions.find(s => s._id === creatingSessionId);
+                    if (!session) return <p className="loading-text">Carregando sessão...</p>;
                     return (
                       <>
                         {session.qrCode ? (
@@ -723,7 +866,7 @@ function App() {
                         ) : (
                           <>
                             <div className="loading">⟳</div>
-                            <p className="loading-text">Gerando QR Code...</p>
+                            <p className="loading-text">Gerando QR Code... (aguarde até 30 segundos)</p>
                           </>
                         )}
                         {session.status === "connected" && (
@@ -785,17 +928,73 @@ function App() {
                 </div>
               </div>
               <div className="stack">
-                <div className={`badge ${paymentMethodId ? 'success' : 'muted'}`}>
+                <div className={`badge ${paymentMethodId ? "success" : "muted"}`}>
                   {paymentMethodId ? "Cartão ativo" : "Sem cartão ativo"}
                 </div>
-                {paymentMethodId && <p className="muted">Cartão atual: {paymentMethodId}</p>}
-                <form className="stack" onSubmit={updatePaymentMethod}>
-                  <label>Novo cartão (token/id)
-                    <input value={paymentInput} onChange={e => setPaymentInput(e.target.value)} placeholder="card_xxx" required />
-                  </label>
-                  <button type="submit">Atualizar cartão</button>
-                </form>
+                <p className="muted">
+                  {paymentMethodId
+                    ? "Cartão armazenado com segurança via Stripe."
+                    : "Nenhum cartão ativo. Clique para adicionar com Stripe Checkout."}
+                </p>
+                {paymentMethodId && <p className="muted">Pagamento ativo (token Stripe): {paymentMethodId}</p>}
+                <button onClick={startStripeCheckout} disabled={isLaunchingCheckout || isFinalizingCheckout}>
+                  {isLaunchingCheckout ? "Redirecionando para Stripe..." : "Adicionar/atualizar cartão via Stripe"}
+                </button>
+                {isFinalizingCheckout && <small className="muted">Finalizando checkout...</small>}
               </div>
+            </div>
+          </section>
+        )}
+
+        {activeSection === "profile" && (
+          <section className="panels-grid">
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Perfil</p>
+                  <h3>Dados cadastrais</h3>
+                  <p className="muted">Complete suas informações para usar todos os recursos.</p>
+                </div>
+              </div>
+              <form className="stack" onSubmit={saveProfile}>
+                <label>Nome completo
+                  <input value={profileData.name} onChange={e => setProfileData({ ...profileData, name: e.target.value })} required />
+                </label>
+                <label>Documento (CPF/CNPJ)
+                  <input value={profileData.document} onChange={e => setProfileData({ ...profileData, document: e.target.value })} required />
+                </label>
+                <label>Telefone
+                  <input value={profileData.phone} onChange={e => setProfileData({ ...profileData, phone: e.target.value })} required />
+                </label>
+                <label>Tipo
+                  <select value={profileData.type} onChange={e => setProfileData({ ...profileData, type: e.target.value as "PF" | "PJ" })}>
+                    <option value="PF">Pessoa Física</option>
+                    <option value="PJ">Pessoa Jurídica</option>
+                  </select>
+                </label>
+                <fieldset className="stack">
+                  <legend>Endereço (opcional)</legend>
+                  <label>Rua
+                    <input value={profileData.address.street} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, street: e.target.value } })} />
+                  </label>
+                  <label>Número
+                    <input value={profileData.address.number} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, number: e.target.value } })} />
+                  </label>
+                  <label>Cidade
+                    <input value={profileData.address.city} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, city: e.target.value } })} />
+                  </label>
+                  <label>Estado
+                    <input value={profileData.address.state} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, state: e.target.value } })} />
+                  </label>
+                  <label>CEP
+                    <input value={profileData.address.zip} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, zip: e.target.value } })} />
+                  </label>
+                  <label>País
+                    <input value={profileData.address.country} onChange={e => setProfileData({ ...profileData, address: { ...profileData.address, country: e.target.value } })} />
+                  </label>
+                </fieldset>
+                <button type="submit" disabled={isSavingProfile}>{isSavingProfile ? "Salvando..." : "Salvar perfil"}</button>
+              </form>
             </div>
           </section>
         )}

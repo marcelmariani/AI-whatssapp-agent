@@ -180,8 +180,10 @@ app.patch("/whatsapp/sessions/:sessionId/reactivate", async (req, res) => {
 
 async function startBaileysSession(sessionId: string, customerId: string, phone: string) {
   try {
+    logger.info({ sessionId, customerId, phone }, "starting Baileys session...");
     const { state, saveCreds } = await useMultiFileAuthState(`./.wa-sessions/${sessionId}`);
     const { version } = await fetchLatestBaileysVersion();
+    logger.info({ sessionId, version }, "Baileys version fetched");
 
     const sock = makeWASocket({
       version,
@@ -192,19 +194,23 @@ async function startBaileysSession(sessionId: string, customerId: string, phone:
         return { conversation: "" };
       }
     });
+    logger.info({ sessionId }, "WhatsApp socket created");
 
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async update => {
       const { connection, qr, lastDisconnect } = update;
+      logger.info({ sessionId, update: { connection, qr: qr ? "present" : "null", lastDisconnect } }, "connection update received");
 
       if (qr) {
         try {
+          logger.info({ sessionId, qrValue: qr.substring(0, 50) }, "generating QR code from value");
           const qrDataUrl = await QRCode.toDataURL(qr);
+          logger.info({ sessionId, qrLength: qrDataUrl.length }, "QR code generated as data URL");
           await Session.findByIdAndUpdate(sessionId, { qrCode: qrDataUrl, status: "pending" });
-          logger.info({ sessionId }, "QR code generated");
+          logger.info({ sessionId }, "QR code saved to database");
         } catch (err) {
-          logger.error({ err }, "failed to generate QR");
+          logger.error({ err, sessionId }, "failed to generate or save QR");
         }
       }
 

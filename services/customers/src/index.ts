@@ -27,9 +27,9 @@ const requireApiKey = (req: express.Request, res: express.Response, next: expres
 const customerSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
-    document: { type: String, required: true, index: true },
+    document: { type: String },
     email: { type: String, required: true },
-    phone: { type: String, required: true },
+    phone: { type: String },
     type: { type: String, enum: ["PF", "PJ"], required: true },
     address: {
       street: String,

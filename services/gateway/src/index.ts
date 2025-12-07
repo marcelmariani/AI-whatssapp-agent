@@ -6,6 +6,8 @@ import pinoHttp from "pino-http";
 import axios from "axios";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
+import Stripe from "stripe";
+import { OAuth2Client } from "google-auth-library";
 
 dotenvFlow.config();
 
@@ -19,6 +21,10 @@ app.use(pinoHttp());
 const port = process.env.PORT || 4000;
 const apiKey = process.env.API_KEY || "";
 const jwtSecret = process.env.JWT_SECRET || "replace-me";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
+const stripe = stripeSecretKey ? new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" }) : null;
+const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
 const services = {
   auth: process.env.AUTH_SERVICE_URL || "http://localhost:4001",
   customers: process.env.CUSTOMERS_SERVICE_URL || "http://localhost:4002",
@@ -132,6 +138,54 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// Google OAuth callback
+app.post("/api/auth/google-callback", async (req, res) => {
+  if (!googleClient) return res.status(500).json({ message: "Google OAuth não configurado" });
+  const { credential } = req.body || {};
+  if (!credential) return res.status(400).json({ message: "credential obrigatório" });
+  
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential });
+    const payload = ticket.getPayload();
+    if (!payload) return res.status(400).json({ message: "token inválido" });
+    
+    const { email, name } = payload;
+    if (!email) return res.status(400).json({ message: "email não encontrado no token" });
+    
+    // Tentar fazer login com o email; se não existe, registrar novo
+    const loginRes = await apiClient.post(`${services.auth}/login`, { 
+      email, 
+      password: `google-${email}` // Senha dummy para Google OAuth
+    }).catch(err => {
+      if (err.response?.status === 401) return null; // Usuário não existe
+      throw err;
+    });
+    
+    if (loginRes) {
+      // Usuário existe, retornar token
+      return res.json(loginRes.data);
+    }
+    
+    // Usuário não existe, registrar novo
+    const registerRes = await apiClient.post(`${services.auth}/register`, {
+      email,
+      password: `google-${email}`,
+      role: "customer",
+      name: name || email.split("@")[0]
+    });
+    
+    // Fazer login com a conta criada
+    const newLoginRes = await apiClient.post(`${services.auth}/login`, {
+      email,
+      password: `google-${email}`
+    });
+    
+    res.json(newLoginRes.data);
+  } catch (err: any) {
+    logger.error({ err }, "Google OAuth verification failed");
+    res.status(err.response?.status || 500).json({ message: "Google authentication failed" });
+  }
+});
 // Rotas protegidas com JWT
 app.use(requireJwt);
 
@@ -190,6 +244,17 @@ app.get("/api/customer/me", requireCustomer, async (req, res) => {
   if (!user.userId) return res.status(400).json({ message: "no userId in token" });
   try {
     const r = await apiClient.get(`${services.customers}/customers/${user.userId}`);
+    res.json(r.data);
+  } catch (err: any) {
+    res.status(err.response?.status || 500).json({ message: "upstream error" });
+  }
+});
+
+app.patch("/api/customer/me", requireCustomer, async (req, res) => {
+  const user = (req as any).user as JwtPayload;
+  if (!user.userId) return res.status(400).json({ message: "no userId in token" });
+  try {
+    const r = await apiClient.put(`${services.customers}/customers/${user.userId}`, req.body);
     res.json(r.data);
   } catch (err: any) {
     res.status(err.response?.status || 500).json({ message: "upstream error" });
@@ -405,6 +470,59 @@ app.post("/api/customer/charges", requireCustomer, async (req, res) => {
     res.status(202).json(r.data);
   } catch (err: any) {
     res.status(err.response?.status || 500).json({ message: "upstream error" });
+  }
+});
+
+// Stripe Checkout (setup mode) para cadastrar cartão
+app.post("/api/customer/billing/checkout-session", requireCustomer, async (req, res) => {
+  const user = (req as any).user as JwtPayload;
+  if (!stripe) return res.status(500).json({ message: "Stripe não configurado" });
+  const { successUrl, cancelUrl } = req.body || {};
+  if (!successUrl || !cancelUrl) return res.status(400).json({ message: "successUrl e cancelUrl são obrigatórios" });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "setup",
+      payment_method_types: ["card"],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      customer_email: user.email,
+      metadata: { customerId: user.userId }
+    });
+    res.json({ url: session.url });
+  } catch (err: any) {
+    logger.error({ err }, "erro ao criar checkout Stripe");
+    res.status(err.statusCode || 500).json({ message: err.message || "stripe error" });
+  }
+});
+
+// Finaliza checkout: recupera paymentMethod e salva no serviço de clientes
+app.get("/api/customer/payment-method/checkout-complete", requireCustomer, async (req, res) => {
+  const user = (req as any).user as JwtPayload;
+  if (!stripe) return res.status(500).json({ message: "Stripe não configurado" });
+  const sessionId = req.query.session_id as string;
+  if (!sessionId) return res.status(400).json({ message: "session_id obrigatório" });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ["setup_intent.payment_method"] });
+    if (session.mode !== "setup") return res.status(400).json({ message: "modo de checkout inválido" });
+    if (session.status !== "complete") return res.status(400).json({ message: "checkout não concluído" });
+    if (session.metadata?.customerId && session.metadata.customerId !== user.userId) return res.status(403).json({ message: "checkout não pertence ao usuário" });
+
+    const setupIntent = session.setup_intent;
+    let paymentMethodId: string | undefined;
+    if (typeof setupIntent === "string") {
+      const si = await stripe.setupIntents.retrieve(setupIntent, { expand: ["payment_method"] });
+      paymentMethodId = typeof si.payment_method === "string" ? si.payment_method : si.payment_method?.id;
+    } else if (setupIntent) {
+      paymentMethodId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method?.id;
+    }
+
+    if (!paymentMethodId) return res.status(400).json({ message: "paymentMethodId não encontrado" });
+
+    await apiClient.put(`${services.customers}/customers/${user.userId}`, { paymentMethodId });
+    res.json({ paymentMethodId });
+  } catch (err: any) {
+    logger.error({ err }, "erro ao finalizar checkout");
+    res.status(err.statusCode || 500).json({ message: err.message || "stripe error" });
   }
 });
 
