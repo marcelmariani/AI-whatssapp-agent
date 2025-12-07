@@ -1,0 +1,51 @@
+version: "3.9"
+services:
+  mongo-auth:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-auth-data:/data/db
+  mongo-customers:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-customers-data:/data/db
+  mongo-whatsapp:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo-whatsapp-data:/data/db
+  mongo-billing:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27020:27017"
+    volumes:
+      - mongo-billing-data:/data/db
+  mongo-prompts:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27021:27017"
+    volumes:
+      - mongo-prompts-data:/data/db
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+volumes:
+  mongo-auth-data:
+  mongo-customers-data:
+  mongo-whatsapp-data:
+  mongo-billing-data:
+  mongo-prompts-data:
+  redis-data:

@@ -1,0 +1,25 @@
+{
+  "name": "smartia-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "dev:admin": "pnpm --filter smart-portal-admin dev",
+    "dev:portal": "pnpm --filter smart-portal dev",
+    "dev:auth": "pnpm --filter @smartia/auth dev",
+    "dev:customers": "pnpm --filter @smartia/customers dev",
+    "dev:whatsapp": "pnpm --filter @smartia/whatsapp dev",
+    "dev:billing": "pnpm --filter @smartia/billing dev",
+    "dev:prompts": "pnpm --filter @smartia/prompts dev",
+    "dev:gateway": "pnpm --filter @smartia/gateway dev",
+    "dev:all": "pnpm -r --parallel dev",
+    "lint": "pnpm -r lint",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "eslint": "^9.10.0",
+    "prettier": "^3.2.0"
+  }
+}
