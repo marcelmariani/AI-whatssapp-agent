@@ -4,22 +4,21 @@ Plataforma completa para automação de atendimento via WhatsApp com IA, cobran�
 
 ---
 
-## 📋 System Design
+## 📋 Visão Geral do Projeto
 
-### Visão Geral
+SmartIA é uma plataforma SaaS que permite clientes automatizar atendimento via WhatsApp usando IA. Os clientes seguem este fluxo:
 
-SmartIA é uma plataforma SaaS que permite clientes automatizar atendimento via WhatsApp usando IA. Os clientes:
-1. Registram e criam perfil
-2. Adicionam cartão de crédito (Stripe)
-3. Criam sessões WhatsApp (geram QR code)
-4. Definem prompts (instruções para IA)
-5. A IA responde automaticamente 24/7
+1. **Registram e criam perfil** - Email, senha e dados pessoais
+2. **Adicionam cartão de crédito** - Integração com Stripe
+3. **Criam sessões WhatsApp** - Autenticação via QR code
+4. **Definem prompts** - Instruções personalizadas para a IA
+5. **IA responde automaticamente** - 24/7 baseada nos prompts definidos
 
 ---
 
-## 🏗️ Arquitetura
+---
 
-### Stack Tecnológico
+## 🏗️ Stack Tecnológico
 
 | Camada | Tecnologia |
 |--------|-----------|
@@ -35,7 +34,9 @@ SmartIA é uma plataforma SaaS que permite clientes automatizar atendimento via 
 
 ---
 
-### Componentes Principais
+## 🏗️ Arquitetura do Sistema
+
+### Diagrama de Componentes
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -73,9 +74,10 @@ SmartIA é uma plataforma SaaS que permite clientes automatizar atendimento via 
 
 ---
 
-### Fluxo do Cliente
+### Fluxo do Cliente - Etapas Principais
 
-#### 1️⃣ **Onboarding**
+#### 1️⃣ Onboarding
+
 ```
 Registrar (email/senha)
     ↓
@@ -133,9 +135,10 @@ Admin recarrega manualmente
 
 ---
 
-## 📦 Microserviços
+## 📦 Microserviços Disponíveis
 
-### **Gateway (Port 4000)**
+### Gateway (Port 4000)
+
 - **Função**: Proxy/orquestrador de autenticação e requisições
 - **Responsabilidades**:
   - Validar JWT em todas as rotas protegidas
@@ -144,7 +147,8 @@ Admin recarrega manualmente
   - Google OAuth (verificar token, criar/login usuário)
 - **ENV**: `JWT_SECRET`, `STRIPE_SECRET_KEY`, `GOOGLE_CLIENT_ID`
 
-### **Auth (Port 4001)**
+### Auth (Port 4001)
+
 - **Função**: Autenticação e gerenciamento de usuários
 - **Responsabilidades**:
   - Register/Login (email/senha)
@@ -154,7 +158,8 @@ Admin recarrega manualmente
 - **Banco**: `auth` (colection: `users`)
 - **ENV**: `JWT_SECRET`, `CUSTOMERS_SERVICE_URL`
 
-### **Customers (Port 4002)**
+### Customers (Port 4002)
+
 - **Função**: Gerenciar dados de clientes
 - **Responsabilidades**:
   - CRUD de clientes (name, document, phone, type, address)
@@ -163,7 +168,8 @@ Admin recarrega manualmente
 - **Banco**: `customers` (colection: `customers`)
 - **Validação**: document/phone opcionais no registro (completar depois em Perfil)
 
-### **WhatsApp (Port 4003)**
+### WhatsApp (Port 4003)
+
 - **Função**: Gerenciar sessões WhatsApp via Baileys
 - **Responsabilidades**:
   - CRUD de sessões
@@ -174,7 +180,14 @@ Admin recarrega manualmente
 - **Armazenamento**: `./.wa-sessions/{sessionId}/` (credenciais locais)
 - **ENV**: `MONGO_URI`, `API_KEY`
 
-### **Prompts (Port 4005)**
+### Billing (Port 4004)
+
+- **Status**: Futuro
+- **Função**: Gerenciar faturas e cobranças automáticas
+- *(Ainda em planejamento)*
+
+### Prompts (Port 4005)
+
 - **Função**: Gerenciar prompts (instruções para IA)
 - **Responsabilidades**:
   - CRUD de prompts
@@ -183,97 +196,98 @@ Admin recarrega manualmente
 - **Banco**: `prompts` (colection: `prompts`)
 - **Campos**: `customerId`, `whatsappNumber`, `prompt`, `status` (active/inactive)
 
-### **Billing (Port 4004)** *(Futuro)*
-- Gerenciar faturas e cobranças automáticas
-- (Ainda em planejamento)
-
 ---
 
 ## 🔐 Segurança & Fluxos de Dados
 
-### Autenticação
+### Autenticação JWT
+
 ```
 Login → JWT gerado (userId, email, role, customerId)
-         ↓
+    ↓
 JWT salvo em localStorage (cliente)
-         ↓
+    ↓
 Cada requisição inclui: Authorization: Bearer {JWT}
-         ↓
+    ↓
 Gateway valida JWT com JWT_SECRET
-         ↓
+    ↓
 Se válido → requisição prossegue; senão → 401
 ```
 
 ### Google OAuth
+
 ```
 Cliente clica "Entrar com Google"
-         ↓
+    ↓
 Google retorna credential (ID token)
-         ↓
+    ↓
 Gateway verifica token com Google Auth Library
-         ↓
+    ↓
 Extrai email/name
-         ↓
+    ↓
 Usuário existe? → login normal
-         ↓
+    ↓
 Não existe? → registrar + login automático
-         ↓
+    ↓
 JWT retornado
 ```
 
 ### Pagamento (Stripe)
+
 ```
 Cliente em Billing clica "Adicionar cartão"
-         ↓
+    ↓
 Gateway cria Stripe Checkout Session (modo setup)
-         ↓
+    ↓
 Cliente redirecionado para Stripe Checkout hospedado
-         ↓
+    ↓
 Cliente preenche dados do cartão (NA STRIPE, não no app)
-         ↓
+    ↓
 Sucesso → volta para app com session_id
-         ↓
+    ↓
 App chama GET /api/customer/payment-method/checkout-complete
-         ↓
+    ↓
 Gateway recupera setupIntent.payment_method do Stripe
-         ↓
+    ↓
 Salva paymentMethodId em customers service
-         ↓
+    ↓
 Cartão ativo (token armazenado, não o número)
 ```
 
 ### Sessões WhatsApp
+
 ```
 POST /api/customer/sessions
-         ↓
+    ↓
 Validar: perfil completo (document + phone) + cartão ativo
-         ↓
+    ↓
 Rejeitar se sem cartão (402 Payment Required)
-         ↓
+    ↓
 Criar sessão com status: pending
-         ↓
+    ↓
 Iniciar Baileys socket
-         ↓
+    ↓
 Gerar QR code (data URL em base64)
-         ↓
+    ↓
 Salvar em banco
-         ↓
+    ↓
 Cliente faz polling (1.5s) para carregar QR
-         ↓
+    ↓
 Quando escaneia → socket detecta autenticação
-         ↓
+    ↓
 Status muda para: connected
 ```
 
 ---
 
-## 🚀 Setup & Deploy
+## 🚀 Setup & Deployment
 
-### Requisitos
+### Requisitos do Sistema
+
 - Node.js LTS
 - PNPM 8+
 - Docker & Docker Compose
-- Stripe Account (test keys)
+- Stripe Account (chaves de teste)
 - Google OAuth Credentials
 
 ### Instalação Local
@@ -303,7 +317,7 @@ docker-compose up -d
 pnpm dev:all
 ```
 
-### URLs de Acesso
+### URLs de Acesso Local
 
 | Serviço | URL |
 |---------|-----|
@@ -321,7 +335,8 @@ pnpm dev:all
 ## 📝 Variáveis de Ambiente
 
 ### Gateway (.env)
-```
+
+```env
 PORT=4000
 AUTH_SERVICE_URL=http://localhost:4001
 CUSTOMERS_SERVICE_URL=http://localhost:4002
@@ -335,8 +350,9 @@ STRIPE_PUBLIC_KEY=pk_test_xxx
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 ```
 
-### Cada Serviço
-```
+### Cada Microserviço
+
+```env
 PORT=400x
 MONGO_URI=mongodb://localhost:270xx/database_name
 API_KEY=dev-key
@@ -348,6 +364,7 @@ JWT_SECRET=seu_segredo_super_seguro (se necessário)
 ## 🧪 Testes Rápidos
 
 ### 1. Verificar serviços
+
 ```bash
 curl http://localhost:4000/health
 curl http://localhost:4001/health
@@ -355,6 +372,7 @@ curl http://localhost:4001/health
 ```
 
 ### 2. Registrar cliente
+
 ```bash
 curl -X POST http://localhost:4000/api/auth/register \
   -H "Content-Type: application/json" \
@@ -363,6 +381,7 @@ curl -X POST http://localhost:4000/api/auth/register \
 ```
 
 ### 3. Fazer login
+
 ```bash
 curl -X POST http://localhost:4000/api/auth/login \
   -H "Content-Type: application/json" \
@@ -371,6 +390,7 @@ curl -X POST http://localhost:4000/api/auth/login \
 ```
 
 ### 4. Completar perfil
+
 ```bash
 curl -X PATCH http://localhost:4000/api/customer/me \
   -H "Content-Type: application/json" \
@@ -380,6 +400,7 @@ curl -X PATCH http://localhost:4000/api/customer/me \
 ```
 
 ### 5. Criar sessão WhatsApp
+
 ```bash
 curl -X POST http://localhost:4000/api/customer/sessions \
   -H "Content-Type: application/json" \
@@ -390,37 +411,39 @@ curl -X POST http://localhost:4000/api/customer/sessions \
 
 ---
 
-## 📊 Sequência: Do Registro à IA Respondendo
+## 📊 Sequência Completa: Do Registro à IA Respondendo
 
 ```
 1. Cliente registra email/senha
-   ↓
+    ↓
 2. Auth cria usuário + sincroniza com Customers
-   ↓
+    ↓
 3. Cliente loga → JWT gerado
-   ↓
+    ↓
 4. Cliente vai em Perfil → completa dados
-   ↓
+    ↓
 5. Cliente vai em Billing → Stripe Checkout
-   ↓
+    ↓
 6. Cartão salvo (token Stripe apenas)
-   ↓
+    ↓
 7. Cliente cria sessão WhatsApp → gera QR
-   ↓
+    ↓
 8. Cliente escaneia → Baileys autentica
-   ↓
+    ↓
 9. Sessão status: connected
-   ↓
+    ↓
 10. Cliente cria prompt → escolhe número conectado
-    ↓
+     ↓
 11. Cliente ativa prompt
-    ↓
+     ↓
 12. IA começa a responder com base no prompt
 ```
 
 ---
 
-## 🛠️ Troubleshooting
+---
+
+## 🔧 Troubleshooting
 
 | Problema | Solução |
 |----------|---------|
@@ -432,17 +455,28 @@ curl -X POST http://localhost:4000/api/customer/sessions \
 
 ---
 
-## 📚 Documentação Adicional
+## 📚 Referências e Documentação
 
-- [Baileys Docs](https://github.com/WhiskeySockets/Baileys)
-- [Stripe API](https://stripe.com/docs/api)
-- [Google OAuth](https://developers.google.com/identity/protocols/oauth2)
-- [Express.js](https://expressjs.com/)
-- [MongoDB](https://docs.mongodb.com/)
+- [Baileys Documentation](https://github.com/WhiskeySockets/Baileys)
+- [Stripe API Reference](https://stripe.com/docs/api)
+- [Google OAuth 2.0](https://developers.google.com/identity/protocols/oauth2)
+- [Express.js Guide](https://expressjs.com/)
+- [MongoDB Documentation](https://docs.mongodb.com/)
+- [React 18 Docs](https://react.dev)
+- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
 
 ---
 
-**Status**: Em desenvolvimento  
-**Versão**: 0.1.0
-#   A I - w h a t s s a p p - a g e n t  
+## 📄 Informações do Projeto
+
+| Campo | Valor |
+|-------|-------|
+| **Status** | Em desenvolvimento |
+| **Versão** | 0.1.0 |
+| **Linguagem Principal** | TypeScript |
+| **Repositório** | [AI-whatssapp-agent](https://github.com/marcelmariani/AI-whatssapp-agent) |
+| **Owner** | marcelmariani |
+
+**Última atualização**: Dezembro 2025
+ 
  
