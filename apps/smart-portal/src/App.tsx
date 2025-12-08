@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGoogleLogin } from "@react-oauth/google";
+import { BillingPayment } from "./components/BillingPayment";
 
 type Prompt = {
   _id: string;
@@ -50,6 +51,8 @@ function App() {
   const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
   const [isLaunchingCheckout, setIsLaunchingCheckout] = useState(false);
   const [isFinalizingCheckout, setIsFinalizingCheckout] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [profileData, setProfileData] = useState({
     name: "",
     document: "",
@@ -257,43 +260,35 @@ function App() {
     }
     setIsLaunchingCheckout(true);
     try {
-      const origin = window.location.origin;
-      const successUrl = `${origin}?billing=success&session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `${origin}?billing=cancel`;
-      const res = await apiFetch(`${apiBase}/api/customer/billing/checkout-session`, {
+      // Criar SetupIntent no backend
+      const res = await apiFetch(`${apiBase}/api/customer/billing/setup-intent`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ successUrl, cancelUrl })
+        headers: { "Content-Type": "application/json" }
       });
-      const data = await safeJson<{ url?: string }>(res);
-      if (!res.ok || !data?.url) {
+      const data = await safeJson<{ clientSecret?: string }>(res);
+      if (!res.ok || !data?.clientSecret) {
         const errData = await safeJson<{ message: string }>(res);
-        throw new Error(errData?.message || "Falha ao iniciar checkout");
+        throw new Error(errData?.message || "Falha ao iniciar formulário de pagamento");
       }
-      window.location.href = data.url;
+      setClientSecret(data.clientSecret);
+      setShowPaymentForm(true);
     } catch (err: any) {
-      setMsg(err?.message || "Erro ao iniciar checkout");
+      setMsg(err?.message || "Erro ao iniciar formulário de pagamento");
     } finally {
       setIsLaunchingCheckout(false);
     }
   }
 
-  async function finalizeStripeCheckout(sessionId: string) {
-    setIsFinalizingCheckout(true);
-    try {
-      const res = await apiFetch(`${apiBase}/api/customer/payment-method/checkout-complete?session_id=${encodeURIComponent(sessionId)}`);
-      const data = await safeJson<{ paymentMethodId?: string; message?: string }>(res);
-      if (!res.ok || !data?.paymentMethodId) {
-        throw new Error(data?.message || "Falha ao finalizar checkout");
-      }
-      setPaymentMethodId(data.paymentMethodId);
-      setMsg("Cartão atualizado e ativo via Stripe.");
-      loadSessions();
-    } catch (err: any) {
-      setMsg(err?.message || "Erro ao finalizar checkout");
-    } finally {
-      setIsFinalizingCheckout(false);
-    }
+  async function handlePaymentSuccess(paymentMethodId: string) {
+    setShowPaymentForm(false);
+    setClientSecret(null);
+    setPaymentMethodId(paymentMethodId);
+    setMsg("Cartão adicionado com sucesso e ativo via Stripe!");
+    loadSessions();
+  }
+
+  async function handlePaymentError(error: string) {
+    setMsg(`Erro ao processar cartão: ${error}`);
   }
 
   async function saveProfile(e: React.FormEvent) {
@@ -439,23 +434,6 @@ function App() {
           handleLogout();
         }
       })();
-    }
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) return;
-    const url = new URL(window.location.href);
-    const billingStatus = url.searchParams.get("billing");
-    const sessionId = url.searchParams.get("session_id");
-    if (billingStatus === "success" && sessionId) {
-      finalizeStripeCheckout(sessionId);
-    } else if (billingStatus === "cancel") {
-      setMsg("Checkout cancelado.");
-    }
-    if (billingStatus) {
-      url.searchParams.delete("billing");
-      url.searchParams.delete("session_id");
-      window.history.replaceState({}, "", url.pathname + (url.search ? `?${url.searchParams.toString()}` : ""));
     }
   }, [token]);
 
@@ -933,14 +911,35 @@ function App() {
                 </div>
                 <p className="muted">
                   {paymentMethodId
-                    ? "Cartão armazenado com segurança via Stripe."
-                    : "Nenhum cartão ativo. Clique para adicionar com Stripe Checkout."}
+                    ? "Cartão armazenado com segurança via Stripe. Clique para atualizar."
+                    : "Nenhum cartão ativo. Clique para adicionar um cartão de crédito."}
                 </p>
                 {paymentMethodId && <p className="muted">Pagamento ativo (token Stripe): {paymentMethodId}</p>}
-                <button onClick={startStripeCheckout} disabled={isLaunchingCheckout || isFinalizingCheckout}>
-                  {isLaunchingCheckout ? "Redirecionando para Stripe..." : "Adicionar/atualizar cartão via Stripe"}
-                </button>
-                {isFinalizingCheckout && <small className="muted">Finalizando checkout...</small>}
+                
+                {!showPaymentForm && (
+                  <button onClick={startStripeCheckout} disabled={isLaunchingCheckout}>
+                    {isLaunchingCheckout ? "Carregando..." : paymentMethodId ? "Atualizar cartão" : "Adicionar cartão"}
+                  </button>
+                )}
+                
+                {showPaymentForm && clientSecret && (
+                  <div className="payment-section">
+                    <p className="eyebrow">Preencha os dados do seu cartão abaixo</p>
+                    <BillingPayment
+                      clientSecret={clientSecret}
+                      onSuccess={handlePaymentSuccess}
+                      onError={handlePaymentError}
+                      isLoading={isLaunchingCheckout}
+                    />
+                    <button 
+                      onClick={() => { setShowPaymentForm(false); setClientSecret(null); }}
+                      className="ghost"
+                      style={{ marginTop: "1rem" }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </section>
